@@ -3,7 +3,13 @@ uuid = "e54c511c-fe38-4435-8f5e-bb364f434f81"
 authors = ["Jae-Mo Lihm <jaemolim96@gmail.com> and contributors"]
 version = "1.0.0-DEV"
 
+[deps]
+HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+
 [compat]
+HDF5 = "0.17.2"
+StaticArrays = "1.9.15"
 julia = "1.6"
 
 [extras]
