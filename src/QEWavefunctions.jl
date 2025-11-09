@@ -27,7 +27,7 @@ struct QEWavefunction
 end
 
 """
-    read_wfc_hdf5(filename) -> QEWavefunction
+    read_wfc_hdf5(filename; metadata_only=false) -> QEWavefunction
 
 Reads wavefunction data from a Quantum ESPRESSO HDF5 file.
 
@@ -37,6 +37,9 @@ See subroutine read_wfc in Modules/io_base.f90 of Quantum ESPRESSO for reference
 
 # Arguments
 - `filename`: The path to the `.hdf5` file (e.g., "wfc1.hdf5").
+- `metadata_only`: If `true`, only reads metadata (attributes) and skips reading
+  large datasets (`mill` and `evc`), returning empty arrays for those fields.
+  Default is `false`.
 
 # Returns
 - A `QEWavefunction` struct containing the loaded data.
