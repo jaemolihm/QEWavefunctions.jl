@@ -4,6 +4,7 @@ using StaticArrays
 using HDF5
 
 export read_qe_wfc_hdf5
+export compute_real_space_wfc
 
 """
     QEWavefunction
@@ -89,6 +90,8 @@ function read_qe_wfc_hdf5(filename; metadata_only::Bool = false)
         QEWavefunction(gamma_only, ik, ispin, xk, scalef, ngw, igwx, npol, nbnd, recip_lattice, mill, evc)
     end
 end
+
+include("real_space.jl")
 
 
 end
