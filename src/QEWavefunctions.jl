@@ -3,9 +3,12 @@ module QEWavefunctions
 using StaticArrays
 using HDF5
 
+export QEWavefunction
 export read_qe_wfc_hdf5
 export write_qe_wfc_hdf5
 export compute_real_space_wfc
+export compute_real_space_wfc_fft
+export compute_z_density
 
 """
     QEWavefunction

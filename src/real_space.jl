@@ -1,5 +1,6 @@
 using StaticArrays
 using LinearAlgebra
+using FFTW
 
 """
     compute_real_space_wfc(wfc::QEWavefunction, ngrid::NTuple{3, Int}) -> Array{ComplexF64, 4}
@@ -77,5 +78,87 @@ function _real_space_grid(ngrid :: NTuple{3, Int})
 
     rgrid_vec = collect(reshape(reinterpret(SVector{3, Float64}, rgrid_arr), prod(ngrid)))
     rgrid_vec
+end
+
+"""
+    compute_real_space_wfc_fft(wfc::QEWavefunction, ngrid::NTuple{3, Int}) -> Array{ComplexF64, 4}
+
+Compute real-space wavefunctions from G-space using FFT.
+
+Equivalent to `compute_real_space_wfc` but uses FFTW's IFFT instead of explicit
+matrix multiplication, which is much faster for large grids.
+
+The output `u_nk(r)` is normalized as ``∑ᵣ |u_nk(r)|² = 1`` over the unit cell.
+
+# Arguments
+- `wfc::QEWavefunction`: Wavefunction data in reciprocal space
+- `ngrid::NTuple{3, Int}`: Real-space grid dimensions (nx, ny, nz)
+
+# Returns
+- 4D array of size (nx, ny, nz, nbnd) containing real-space wavefunctions
+"""
+function compute_real_space_wfc_fft(wfc::QEWavefunction, ngrid::NTuple{3, Int})
+    nx, ny, nz = ngrid
+    nbnd = size(wfc.evc, 2)
+    coeff = zeros(ComplexF64, nx, ny, nz, nbnd)
+    for (iG, G) in enumerate(wfc.mill)
+        ix = mod(G[1], nx) + 1
+        iy = mod(G[2], ny) + 1
+        iz = mod(G[3], nz) + 1
+        for n in 1:nbnd
+            coeff[ix, iy, iz, n] = wfc.evc[iG, n]
+        end
+    end
+    # IFFT along spatial dims; FFTW IFFT divides by N, we want 1/√N normalization
+    wfc_r = ifft(coeff, (1, 2, 3))
+    wfc_r .*= sqrt(prod(ngrid))
+    return wfc_r
+end
+
+"""
+    compute_z_density(wfc::QEWavefunction, nz::Int) -> Matrix{Float64}
+
+Compute z-projected density for each band using FFT along z.
+
+Returns `ρ[iz, n] = (1/nz) Σ_{Gx,Gy} |Σ_{Gz} c(Gx,Gy,Gz,n) e^{2πi Gz (iz-1)/nz}|²`
+
+This is memory-efficient: only allocates O(n_gxy_groups × nz) instead of the full 3D grid.
+
+# Arguments
+- `wfc::QEWavefunction`: Wavefunction data in reciprocal space
+- `nz::Int`: Number of grid points along z
+
+# Returns
+- Matrix of size (nz, nbnd) containing z-projected density
+"""
+function compute_z_density(wfc::QEWavefunction, nz::Int)
+    nbnd = size(wfc.evc, 2)
+
+    # Group G-vectors by (Gx, Gy)
+    gxy_keys = [(G[1], G[2]) for G in wfc.mill]
+    unique_gxy = unique(gxy_keys)
+    gxy_to_idx = Dict(k => i for (i, k) in enumerate(unique_gxy))
+    n_groups = length(unique_gxy)
+
+    coeff = zeros(ComplexF64, n_groups, nz)
+    rho = zeros(Float64, nz, nbnd)
+
+    for n in 1:nbnd
+        fill!(coeff, 0)
+        for (iG, G) in enumerate(wfc.mill)
+            g = gxy_to_idx[(G[1], G[2])]
+            gz_idx = mod(G[3], nz) + 1
+            coeff[g, gz_idx] += wfc.evc[iG, n]
+        end
+        f = ifft(coeff, 2)  # IFFT along z dimension: (n_groups, nz)
+        for iz in 1:nz
+            for g in 1:n_groups
+                rho[iz, n] += abs2(f[g, iz])
+            end
+        end
+    end
+    # ifft divides by nz; we want ρ = (1/nz)|Σ c e^{...}|² = nz * Σ|ifft|²
+    rho .*= nz
+    return rho
 end
 
