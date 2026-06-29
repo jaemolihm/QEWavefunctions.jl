@@ -2,10 +2,15 @@ module QEWavefunctions
 
 using StaticArrays
 using HDF5
+using LinearAlgebra
 
 export QEWavefunction
+export read_qe_wfc
 export read_qe_wfc_hdf5
+export read_qe_wfc_dat
 export write_qe_wfc_hdf5
+export match_miller_indices
+export compute_wfc_overlap
 export compute_real_space_wfc
 export compute_real_space_wfc_fft
 export compute_z_density
@@ -153,6 +158,181 @@ function write_qe_wfc_hdf5(filename, wfc::QEWavefunction; band_range=nothing)
             attrs(file)["band_range"] = Int32.(collect(band_range))
         end
     end
+end
+
+"""
+    read_qe_wfc(filename; metadata_only=false, bands=nothing) -> QEWavefunction
+
+Dispatches to `read_qe_wfc_hdf5` or `read_qe_wfc_dat` based on the file extension
+(`.hdf5` or `.dat`).
+"""
+function read_qe_wfc(filename; kwargs...)
+    if endswith(filename, ".hdf5")
+        read_qe_wfc_hdf5(filename; kwargs...)
+    elseif endswith(filename, ".dat")
+        read_qe_wfc_dat(filename; kwargs...)
+    else
+        error("Unknown extension for QE wfc file: $filename (expected .hdf5 or .dat)")
+    end
+end
+
+# Read one Fortran sequential unformatted record. Records are framed by 4-byte
+# little-endian length markers at both ends. Returns the payload as a byte vector.
+function _read_fortran_record(io::IO)
+    n = read(io, Int32)
+    bytes = read(io, Int(n))
+    length(bytes) == n || error("Truncated Fortran record (expected $n bytes, got $(length(bytes)))")
+    n_end = read(io, Int32)
+    n_end == n || error("Fortran record marker mismatch: head=$n tail=$n_end")
+    bytes
+end
+
+function _skip_fortran_record(io::IO)
+    n = read(io, Int32)
+    skip(io, Int(n))
+    n_end = read(io, Int32)
+    n_end == n || error("Fortran record marker mismatch while skipping: head=$n tail=$n_end")
+    nothing
+end
+
+"""
+    read_qe_wfc_dat(filename; metadata_only=false, bands=nothing) -> QEWavefunction
+
+Read a Quantum ESPRESSO wavefunction stored in Fortran sequential unformatted
+binary (`wfcN.dat`). Mirrors `read_qe_wfc_hdf5` for HDF5 inputs.
+
+Record layout (see `write_wfc` in QE Modules/io_base.f90):
+1. `ik (i4), xk (r8 × 3), ispin (i4), gamma_only (l4), scalef (r8)` — 44 bytes
+2. `ngw (i4), igwx (i4), npol (i4), nbnd (i4)` — 16 bytes
+3. `b1, b2, b3 (r8 × 9)` — 72 bytes
+4. `mill (i4 × 3 × igwx)`
+5..`nbnd+4`. one per band: `evc(1:npol*igwx)` (c16)
+"""
+function read_qe_wfc_dat(filename; metadata_only::Bool = false, bands = nothing)
+    open(filename, "r") do io
+        # Record 1
+        rec = _read_fortran_record(io)
+        length(rec) == 44 || error("Unexpected size for record 1: $(length(rec)) (expected 44)")
+        ik = Int(reinterpret(Int32, @view rec[1:4])[1])
+        xk = SVector{3, Float64}(reinterpret(Float64, @view rec[5:28]))
+        ispin = Int(reinterpret(Int32, @view rec[29:32])[1])
+        gamma_only = reinterpret(Int32, @view rec[33:36])[1] != 0
+        scalef = reinterpret(Float64, @view rec[37:44])[1]
+
+        # Record 2
+        rec = _read_fortran_record(io)
+        length(rec) == 16 || error("Unexpected size for record 2: $(length(rec)) (expected 16)")
+        h = reinterpret(Int32, rec)
+        ngw, igwx, npol, nbnd = Int(h[1]), Int(h[2]), Int(h[3]), Int(h[4])
+
+        # Record 3: reciprocal lattice vectors
+        rec = _read_fortran_record(io)
+        length(rec) == 72 || error("Unexpected size for record 3: $(length(rec)) (expected 72)")
+        bg = reshape(collect(reinterpret(Float64, rec)), (3, 3))
+        recip_lattice = SMatrix{3, 3, Float64}(bg)
+
+        if metadata_only
+            return QEWavefunction(gamma_only, ik, ispin, xk, scalef, ngw, igwx, npol, nbnd,
+                                  recip_lattice, SVector{3, Int}[], Matrix{ComplexF64}(undef, 0, 0))
+        end
+
+        # Record 4: Miller indices
+        rec = _read_fortran_record(io)
+        length(rec) == 12 * igwx || error("Unexpected size for Miller indices record: $(length(rec)) (expected $(12*igwx))")
+        mill_i32 = collect(reinterpret(SVector{3, Int32}, rec))
+        mill = SVector{3, Int}.(mill_i32)
+
+        # Records 5..nbnd+4: evc, one record per band, npol*igwx ComplexF64 each
+        if bands === nothing
+            evc = Matrix{ComplexF64}(undef, npol * igwx, nbnd)
+            for j in 1:nbnd
+                rec = _read_fortran_record(io)
+                length(rec) == 16 * npol * igwx || error(
+                    "Unexpected size for evc record $j: $(length(rec)) (expected $(16*npol*igwx))")
+                evc[:, j] .= reinterpret(ComplexF64, rec)
+            end
+        else
+            sel = collect(bands)
+            keep_idx = Dict(b => i for (i, b) in enumerate(sel))
+            evc = Matrix{ComplexF64}(undef, npol * igwx, length(sel))
+            for j in 1:nbnd
+                if haskey(keep_idx, j)
+                    rec = _read_fortran_record(io)
+                    length(rec) == 16 * npol * igwx || error(
+                        "Unexpected size for evc record $j: $(length(rec)) (expected $(16*npol*igwx))")
+                    evc[:, keep_idx[j]] .= reinterpret(ComplexF64, rec)
+                else
+                    _skip_fortran_record(io)
+                end
+            end
+        end
+
+        QEWavefunction(gamma_only, ik, ispin, xk, scalef, ngw, igwx, npol, nbnd,
+                       recip_lattice, mill, evc)
+    end
+end
+
+"""
+    match_miller_indices(wfc1::QEWavefunction, wfc2::QEWavefunction) -> (idx1, idx2)
+
+Find Miller indices shared by `wfc1` and `wfc2`, returning index vectors such that
+`wfc1.mill[idx1] == wfc2.mill[idx2]` elementwise.
+
+The returned indices preserve the order of `wfc1.mill`, so downstream code that
+pre-computes phases from `wfc1.mill[idx1]` indexes consistently into the matched
+rows of `wfc1.evc` and `wfc2.evc`.
+
+Useful when comparing wavefunctions from two QE runs whose G-spheres differ
+(e.g. different geometries with slightly different reciprocal lattices).
+"""
+function match_miller_indices(wfc1::QEWavefunction, wfc2::QEWavefunction)
+    mill2_to_idx = Dict{SVector{3, Int}, Int}()
+    sizehint!(mill2_to_idx, length(wfc2.mill))
+    for (i, G) in enumerate(wfc2.mill)
+        mill2_to_idx[G] = i
+    end
+    n_max = min(length(wfc1.mill), length(wfc2.mill))
+    idx1 = Int[]
+    idx2 = Int[]
+    sizehint!(idx1, n_max)
+    sizehint!(idx2, n_max)
+    for (i, G) in enumerate(wfc1.mill)
+        j = get(mill2_to_idx, G, 0)
+        if j != 0
+            push!(idx1, i)
+            push!(idx2, j)
+        end
+    end
+    return idx1, idx2
+end
+
+"""
+    compute_wfc_overlap(wfc1::QEWavefunction, wfc2::QEWavefunction;
+                        dR=SVector(0., 0., 0.)) -> Matrix{ComplexF64}
+
+Compute the overlap matrix `S[m, n] = <ψ1_m | exp(-i (k+G) · dR) | ψ2_n>` between
+two wavefunctions, restricted to Miller indices present in both.
+
+`dR` is an optional Wannier-center shift (Cartesian, Bohr); when zero the phase
+factor is skipped.
+
+`wfc1.recip_lattice` and `wfc1.xk` are used to build the k+G vectors that enter
+the phase — same-Miller-index is treated as same-plane-wave, the appropriate
+convention when the two structures share a nearly identical lattice.
+
+Only npol=1 (collinear) wavefunctions are supported.
+"""
+function compute_wfc_overlap(wfc1::QEWavefunction, wfc2::QEWavefunction;
+                             dR::SVector{3, Float64} = SVector(0., 0., 0.))
+    @assert wfc1.npol == 1 && wfc2.npol == 1 "compute_wfc_overlap only supports npol=1"
+    @assert wfc1.ispin == wfc2.ispin "ispin mismatch: $(wfc1.ispin) vs $(wfc2.ispin)"
+    idx1, idx2 = match_miller_indices(wfc1, wfc2)
+    if iszero(dR)
+        return wfc1.evc[idx1, :]' * wfc2.evc[idx2, :]
+    end
+    kGs = Ref(wfc1.recip_lattice) .* wfc1.mill[idx1] .+ Ref(wfc1.xk)
+    phase = cis.(.-dot.(kGs, Ref(dR)))
+    return wfc1.evc[idx1, :]' * Diagonal(phase) * wfc2.evc[idx2, :]
 end
 
 include("real_space.jl")
