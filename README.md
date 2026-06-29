@@ -111,17 +111,17 @@ julia --project=. -e 'using Pkg; Pkg.instantiate()'   # one-time
 Then run it directly from anywhere (julia must be on `PATH`):
 
 ```bash
-/path/to/QEWavefunctions.jl/scripts/generate_amn.jl prefix folder_orig folder_pert outdir_orig outdir_pert output.amn
+/path/to/QEWavefunctions.jl/scripts/generate_amn.jl prefix folder_orig folder_pert wfcdir_orig wfcdir_pert output.amn
 ```
 
 or explicitly through julia:
 
 ```bash
-julia --project=/path/to/QEWavefunctions.jl /path/to/QEWavefunctions.jl/scripts/generate_amn.jl prefix folder_orig folder_pert outdir_orig outdir_pert output.amn
+julia --project=/path/to/QEWavefunctions.jl /path/to/QEWavefunctions.jl/scripts/generate_amn.jl prefix folder_orig folder_pert wfcdir_orig wfcdir_pert output.amn
 ```
 
 where `folder_orig` holds `<prefix>.nnkp` + `<prefix>.chk`, `folder_pert` holds
-`<prefix>.nnkp`, and `outdir_orig`/`outdir_pert` hold the QE `wfcN` files. Run
+`<prefix>.nnkp`, and `wfcdir_orig`/`wfcdir_pert` hold the QE `wfcN` files. Run
 with no arguments to print the full usage message.
 
 A complete Si workflow (QE + Wannier90 + `generate_amn.jl`) is provided in

@@ -7,7 +7,7 @@
 # function n is translated by dR_n before overlapping with the perturbed bands.
 #
 # Usage:
-#   ./scripts/generate_amn.jl prefix folder_orig folder_pert outdir_orig outdir_pert output.amn
+#   ./scripts/generate_amn.jl prefix folder_orig folder_pert wfcdir_orig wfcdir_pert output.amn
 #
 # or, if julia is not on PATH / the environment is installed elsewhere:
 #   julia --project=/path/to/QEWavefunctions.jl scripts/generate_amn.jl ARGS...
@@ -16,8 +16,8 @@
 #   prefix        Wannier90 prefix (reads <prefix>.chk and <prefix>.nnkp)
 #   folder_orig   Folder with <prefix>.nnkp and <prefix>.chk of the reference system
 #   folder_pert   Folder with <prefix>.nnkp of the perturbed system
-#   outdir_orig   QE save folder with reference wfcN.hdf5 or wfcN.dat
-#   outdir_pert   QE save folder with perturbed wfcN.hdf5 or wfcN.dat
+#   wfcdir_orig   QE save folder with reference wfcN.hdf5 or wfcN.dat
+#   wfcdir_pert   QE save folder with perturbed wfcN.hdf5 or wfcN.dat
 #   output.amn    Output amn file path
 #
 # wfc files in either HDF5 (wfcN.hdf5) or Fortran binary (wfcN.dat) format are
@@ -71,7 +71,7 @@ function _read_projection_shifts(nnkp_orig, nnkp_pert)
 end
 
 function generate_amn_using_rigid_WF(prefix, folder_orig, folder_pert,
-                                     outdir_orig, outdir_pert, filename_output)
+                                     wfcdir_orig, wfcdir_pert, filename_output)
     # Reference Wannier functions
     chk = read_chk(joinpath(folder_orig, prefix * ".chk"))
 
@@ -84,8 +84,8 @@ function generate_amn_using_rigid_WF(prefix, folder_orig, folder_pert,
     end
     flush(stdout)
 
-    wfc1_orig = _find_wfc(outdir_orig, 1)
-    wfc1_pert = _find_wfc(outdir_pert, 1)
+    wfc1_orig = _find_wfc(wfcdir_orig, 1)
+    wfc1_pert = _find_wfc(wfcdir_pert, 1)
 
     wfc_metadata = read_qe_wfc(wfc1_orig; metadata_only = true)
     flush(stderr)
@@ -131,15 +131,15 @@ function generate_amn_using_rigid_WF(prefix, folder_orig, folder_pert,
         end
 
         wfc_orig = if orig_trimmed
-            read_qe_wfc(_find_wfc(outdir_orig, ik))
+            read_qe_wfc(_find_wfc(wfcdir_orig, ik))
         else
-            read_qe_wfc(_find_wfc(outdir_orig, ik); bands=band_rng)
+            read_qe_wfc(_find_wfc(wfcdir_orig, ik); bands=band_rng)
         end
 
         wfc_pert = if pert_trimmed
-            read_qe_wfc(_find_wfc(outdir_pert, ik))
+            read_qe_wfc(_find_wfc(wfcdir_pert, ik))
         else
-            read_qe_wfc(_find_wfc(outdir_pert, ik); bands=band_rng)
+            read_qe_wfc(_find_wfc(wfcdir_pert, ik); bands=band_rng)
         end
 
         xk_crys_orig = wfc_orig.recip_lattice \ wfc_orig.xk
@@ -172,13 +172,13 @@ end;
 function main(args)
     if length(args) != 6
         println(stderr, """
-        Usage: generate_amn.jl prefix folder_orig folder_pert outdir_orig outdir_pert output.amn
+        Usage: generate_amn.jl prefix folder_orig folder_pert wfcdir_orig wfcdir_pert output.amn
 
           prefix        Wannier90 prefix (reads <prefix>.chk and <prefix>.nnkp)
           folder_orig   Folder with <prefix>.nnkp and <prefix>.chk of the reference system
           folder_pert   Folder with <prefix>.nnkp of the perturbed system
-          outdir_orig   QE save folder with reference wfcN.hdf5 or wfcN.dat
-          outdir_pert   QE save folder with perturbed wfcN.hdf5 or wfcN.dat
+          wfcdir_orig   QE save folder with reference wfcN.hdf5 or wfcN.dat
+          wfcdir_pert   QE save folder with perturbed wfcN.hdf5 or wfcN.dat
           output.amn    Output amn file path
         """)
         exit(1)
@@ -187,21 +187,21 @@ function main(args)
     prefix = args[1]
     folder_orig = args[2]
     folder_pert = args[3]
-    outdir_orig = args[4]
-    outdir_pert = args[5]
+    wfcdir_orig = args[4]
+    wfcdir_pert = args[5]
     filename_output = args[6]
 
     println("# Generating amn file using rigidly displaced Wannier functions")
     println("# Wannier90 prefix                      : $prefix")
     println("# nnkp/chk folder of reference system   : $folder_orig")
     println("# nnkp folder of perturbed system       : $folder_pert")
-    println("# QE save folder of reference system    : $outdir_orig")
-    println("# QE save folder of perturbed system    : $outdir_pert")
+    println("# QE save folder of reference system    : $wfcdir_orig")
+    println("# QE save folder of perturbed system    : $wfcdir_pert")
     println("# Output amn file                       : $filename_output")
     flush(stdout)
 
     generate_amn_using_rigid_WF(prefix, folder_orig, folder_pert,
-                                outdir_orig, outdir_pert, filename_output)
+                                wfcdir_orig, wfcdir_pert, filename_output)
 
     println("# amn file written")
     flush(stdout)
