@@ -13,11 +13,15 @@ QE=$HOME/program/qe_epw/bin
 W90=$HOME/program/wannier90/wannier90.x
 QEWAN=$HOME/forces_DMFT/QEWavefunctions.jl
 
+# Bundled helper scripts (my_qe_bands.py, plotband.py), found relative to run.sh
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BIN="$SCRIPT_DIR/../bin"
+
 # SCF + bands + nscf + Wannier90 .nnkp/.amn/.mmn/.eig for the current directory
 run_qe_w90() {
     mpirun -np 12 $QE/pw.x -nk 4 -ndiag 1 -in scf.in   > scf.out
     mpirun -np 12 $QE/pw.x -nk 4 -ndiag 1 -in bands.in > bands.out
-    my_qe_bands.py si temp
+    $BIN/my_qe_bands.py si temp
     mpirun -np 12 $QE/pw.x -nk 4 -ndiag 1 -in nscf.in  > nscf.out
     mpirun -np 1  $W90 -pp si
     mpirun -np 12 $QE/pw2wannier90.x -nk 4 -ndiag 1 -in pw2wan.in > pw2wan.out
@@ -27,7 +31,7 @@ run_qe_w90() {
 cd ref
 run_qe_w90
 mpirun -np 12 $W90 si
-plotband.py si --png
+$BIN/plotband.py si --png
 cd ..
 
 # === Perturbed system ===
@@ -50,5 +54,5 @@ julia --project=$QEWAN $QEWAN/scripts/generate_amn.jl \
   si.amn
 mpirun -np 12 $W90 si
 cp si.wout si.rigidWF.wout
-plotband.py si --png
+$BIN/plotband.py si --png
 cd ..
