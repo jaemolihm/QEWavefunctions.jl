@@ -58,6 +58,9 @@ function _read_band_range(filename)
     end
 end
 
+# TODO: Drop _read_spinor_projection_centers and _read_projection_centers once
+# WannierIO supports the `spinor_projections` block (qiaojunfeng/WannierIO.jl#34).
+# Then read centers directly via read_nnkp(...).spinor_projections / .projections.
 """
 Parse the centers of the `spinor_projections` block of an nnkp file (crystal
 coordinates). WannierIO's `read_nnkp` only parses the scalar `projections` block,
