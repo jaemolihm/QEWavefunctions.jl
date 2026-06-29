@@ -59,15 +59,54 @@ function _read_band_range(filename)
 end
 
 """
+Parse the centers of the `spinor_projections` block of an nnkp file (crystal
+coordinates). WannierIO's `read_nnkp` only parses the scalar `projections` block,
+so spinor projections are read here directly.
+
+Each spinor projection occupies three lines; the center is the first three
+numbers of the first line:
+    cx cy cz   l mr rad
+    zx zy zz   xx xy xz   zona
+    spin   sqx sqy sqz
+"""
+function _read_spinor_projection_centers(nnkp_file)
+    lines = readlines(nnkp_file)
+    i = findfirst(l -> occursin("begin spinor_projections", l), lines)
+    i === nothing && return nothing
+    n_projs = parse(Int, strip(lines[i + 1]))
+    centers = SVector{3, Float64}[]
+    for j in 1:n_projs
+        toks = split(strip(lines[i + 1 + 3 * (j - 1) + 1]))
+        push!(centers, SVector{3, Float64}(parse.(Float64, toks[1:3])))
+    end
+    return centers
+end
+
+"""
+Read projection centers (crystal coordinates) from an nnkp file, supporting both
+the scalar `projections` block (collinear) and the `spinor_projections` block
+(spinor / noncollinear).
+"""
+function _read_projection_centers(nnkp_file)
+    proj = get(read_nnkp(nnkp_file), :projections, nothing)
+    if proj !== nothing
+        return [SVector{3, Float64}(p.center) for p in proj]
+    end
+    centers = _read_spinor_projection_centers(nnkp_file)
+    centers === nothing && error("No `projections` or `spinor_projections` block in $nnkp_file")
+    return centers
+end
+
+"""
 Read per-Wannier-function rigid shifts from the projection centers of the two
 nnkp files: dR_n = center_pert_n - center_orig_n, in crystal coordinates.
 """
 function _read_projection_shifts(nnkp_orig, nnkp_pert)
-    proj_orig = read_nnkp(nnkp_orig).projections
-    proj_pert = read_nnkp(nnkp_pert).projections
-    @assert length(proj_orig) == length(proj_pert) (
-        "Number of projections differ: orig=$(length(proj_orig)), pert=$(length(proj_pert))")
-    return [SVector{3, Float64}(p.center - o.center) for (o, p) in zip(proj_orig, proj_pert)]
+    c_orig = _read_projection_centers(nnkp_orig)
+    c_pert = _read_projection_centers(nnkp_pert)
+    @assert length(c_orig) == length(c_pert) (
+        "Number of projections differ: orig=$(length(c_orig)), pert=$(length(c_pert))")
+    return [SVector{3, Float64}(p - o) for (o, p) in zip(c_orig, c_pert)]
 end
 
 function generate_amn_using_rigid_WF(prefix, folder_orig, folder_pert,
@@ -146,6 +185,7 @@ function generate_amn_using_rigid_WF(prefix, folder_orig, folder_pert,
         xk_crys_pert = wfc_pert.recip_lattice \ wfc_pert.xk
         @assert xk_crys_orig ≈ xk_crys_pert "k-points do not match between wfc files"
         @assert xk_crys_orig ≈ chk.kpoints[ik] "k-points do not match with chk file"
+        @assert wfc_orig.npol == wfc_pert.npol "npol mismatch: orig=$(wfc_orig.npol), pert=$(wfc_pert.npol)"
 
         U = get_U(chk)[ik]
 
@@ -153,13 +193,21 @@ function generate_amn_using_rigid_WF(prefix, folder_orig, folder_pert,
         #   A[m, n] = < wfc_pert_m | exp(-i (k+G)·dR_n) | wan_orig_n >
         # with wan_orig_n = sum_m' wfc_orig_m' U[m', n] and, since b_i·a_j = 2π δ_ij,
         #   (k+G)·dR_n = 2π (κ + mill_G)·dR_crys_n  (κ = k in crystal coords).
+        # For spinors (npol=2) the overlap is summed over both spin components; the
+        # translation phase is spin-diagonal and identical for both. In QE's evc
+        # layout, rows 1:igwx hold spin component 1 and igwx+1:2igwx component 2.
         idx_pert, idx_orig = match_miller_indices(wfc_pert, wfc_orig)
-        D = wfc_orig.evc[idx_orig, :] * U                      # orig WFs in G-space (matched)
         κ = SVector{3, Float64}(chk.kpoints[ik])
         mill_m = wfc_orig.mill[idx_orig]
         phase = [cispi(-2 * dot(κ + mill_m[g], dR_crys[n]))
                  for g in eachindex(mill_m), n in 1:n_wann]
-        A_ik = wfc_pert.evc[idx_pert, :]' * (D .* phase)
+        A_ik = zeros(ComplexF64, size(wfc_pert.evc, 2), n_wann)
+        for σ in 1:wfc_orig.npol
+            rows_orig = idx_orig .+ (σ - 1) * wfc_orig.igwx
+            rows_pert = idx_pert .+ (σ - 1) * wfc_pert.igwx
+            D = wfc_orig.evc[rows_orig, :] * U                 # orig WFs in G-space (matched, this spin)
+            A_ik .+= wfc_pert.evc[rows_pert, :]' * (D .* phase)
+        end
 
         A_ik
     end

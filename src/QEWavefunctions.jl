@@ -320,19 +320,32 @@ factor is skipped.
 the phase — same-Miller-index is treated as same-plane-wave, the appropriate
 convention when the two structures share a nearly identical lattice.
 
-Only npol=1 (collinear) wavefunctions are supported.
+For spinor wavefunctions (`npol == 2`) the overlap is summed over both spin
+components: `S[m, n] = Σ_σ Σ_G conj(c1_m[G, σ]) e^{-i(k+G)·dR} c2_n[G, σ]`. The
+translation phase is spin-diagonal, so the same phase factor is applied to both
+components. In QE's `evc` layout, rows `1:igwx` hold spin component 1 and rows
+`igwx+1:2*igwx` hold spin component 2.
 """
 function compute_wfc_overlap(wfc1::QEWavefunction, wfc2::QEWavefunction;
                              dR::SVector{3, Float64} = SVector(0., 0., 0.))
-    @assert wfc1.npol == 1 && wfc2.npol == 1 "compute_wfc_overlap only supports npol=1"
+    @assert wfc1.npol == wfc2.npol "npol mismatch: $(wfc1.npol) vs $(wfc2.npol)"
     @assert wfc1.ispin == wfc2.ispin "ispin mismatch: $(wfc1.ispin) vs $(wfc2.ispin)"
     idx1, idx2 = match_miller_indices(wfc1, wfc2)
-    if iszero(dR)
-        return wfc1.evc[idx1, :]' * wfc2.evc[idx2, :]
+    phase = iszero(dR) ? nothing : begin
+        kGs = Ref(wfc1.recip_lattice) .* wfc1.mill[idx1] .+ Ref(wfc1.xk)
+        cis.(.-dot.(kGs, Ref(dR)))
     end
-    kGs = Ref(wfc1.recip_lattice) .* wfc1.mill[idx1] .+ Ref(wfc1.xk)
-    phase = cis.(.-dot.(kGs, Ref(dR)))
-    return wfc1.evc[idx1, :]' * Diagonal(phase) * wfc2.evc[idx2, :]
+    S = zeros(ComplexF64, size(wfc1.evc, 2), size(wfc2.evc, 2))
+    for σ in 1:wfc1.npol
+        rows1 = idx1 .+ (σ - 1) * wfc1.igwx
+        rows2 = idx2 .+ (σ - 1) * wfc2.igwx
+        if phase === nothing
+            S .+= wfc1.evc[rows1, :]' * wfc2.evc[rows2, :]
+        else
+            S .+= wfc1.evc[rows1, :]' * Diagonal(phase) * wfc2.evc[rows2, :]
+        end
+    end
+    return S
 end
 
 include("real_space.jl")
