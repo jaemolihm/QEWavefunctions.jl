@@ -80,12 +80,51 @@ The fields of `QEWavefunction` (k-point `xk`, reciprocal lattice
 `recip_lattice`, Miller indices `mill`, coefficients `evc`, etc.) are documented
 in the docstrings; access them in the REPL with `?QEWavefunction`.
 
+## Scripts
+
+`scripts/generate_amn.jl` generates a Wannier90 `.amn` file from rigidly
+displaced Wannier functions, using the overlap between a reference and a
+perturbed QE run. The per-Wannier-function rigid shift is taken from the
+difference of projection centers in the two `prefix.nnkp` files
+(`dR_n = center_pert_n − center_orig_n`), so each reference Wannier function is
+translated onto its perturbed position before overlapping with the perturbed
+bands. It auto-detects `wfcN.hdf5`/`wfcN.dat` per folder.
+
+The script uses dependencies (WannierIO, HDF5, …) that are direct dependencies
+of the *package* but not of an end-user environment, so it must be run from a
+**clone or `Pkg.develop` checkout** of this repo, not from a bare `Pkg.add`
+install. The script self-activates the repo's project, so a one-time
+`instantiate` is all the setup needed:
+
+```bash
+git clone https://github.com/jaemolihm/QEWavefunctions.jl
+cd QEWavefunctions.jl
+julia --project=. -e 'using Pkg; Pkg.instantiate()'   # one-time
+```
+
+Then run it directly from anywhere (julia must be on `PATH`):
+
+```bash
+/path/to/QEWavefunctions.jl/scripts/generate_amn.jl prefix folder_orig folder_pert outdir_orig outdir_pert output.amn
+```
+
+or explicitly through julia:
+
+```bash
+julia --project=/path/to/QEWavefunctions.jl /path/to/QEWavefunctions.jl/scripts/generate_amn.jl prefix folder_orig folder_pert outdir_orig outdir_pert output.amn
+```
+
+where `folder_orig` holds `<prefix>.nnkp` + `<prefix>.chk`, `folder_pert` holds
+`<prefix>.nnkp`, and `outdir_orig`/`outdir_pert` hold the QE `wfcN` files. Run
+with no arguments to print the full usage message.
+
 ## Dependencies
 
 - [HDF5.jl](https://github.com/JuliaIO/HDF5.jl) — reading/writing QE HDF5 files
 - [StaticArrays.jl](https://github.com/JuliaArrays/StaticArrays.jl) — fixed-size
   lattice vectors and Miller indices
 - [FFTW.jl](https://github.com/JuliaMath/FFTW.jl) — real-space transforms
+- [WannierIO.jl](https://github.com/qiaojunfeng/WannierIO.jl) — reading `.chk` and writing `.amn` (used by `scripts/generate_amn.jl`)
 - LinearAlgebra (stdlib)
 
 Julia 1.6 or later.
