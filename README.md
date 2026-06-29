@@ -43,7 +43,14 @@ install does not expose.
 
 ### Developing locally
 
-If you have a local clone and want to hack on it:
+Clone the repository and hack on it:
+
+```bash
+git clone https://github.com/jaemolihm/QEWavefunctions.jl
+cd QEWavefunctions.jl
+```
+
+Then, in the Julia REPL:
 
 ```julia
 using Pkg
