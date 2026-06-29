@@ -35,6 +35,12 @@ using Pkg
 Pkg.add(url="https://github.com/jaemolihm/QEWavefunctions.jl")
 ```
 
+`Pkg.add` is enough to *use the library* in your own code. To run the bundled
+scripts (e.g. `scripts/generate_amn.jl`), use a **clone / `Pkg.develop`
+checkout** instead — see [Developing locally](#developing-locally) below — since
+the scripts rely on the package's own dependencies, which a plain `Pkg.add`
+install does not expose.
+
 ### Developing locally
 
 If you have a local clone and want to hack on it:
